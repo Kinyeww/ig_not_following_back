@@ -1,5 +1,5 @@
 so basically you just paste this file in your directory that contains files like following1 followers...etc 
-you just run "python checker.py" in your command.
+you just run "python checker.py" in your terminal.
 
 
 Note that when you are exporting your information from instagram, its best to choose shorter time range like last year or maybe 3 years, well you still can choose al time bu do take note tha instagram logs everything
