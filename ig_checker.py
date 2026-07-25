@@ -2,20 +2,6 @@ import json
 import os
 import sys
 
-# --- Helper: paths relative to script (parent directory) ---
-base_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(base_dir)
-
-followers_path = os.path.join(parent_dir, "followers_1.json")
-following_path = os.path.join(parent_dir, "following.json")
-
-if not os.path.exists(followers_path):
-    print(f"ERROR: followers file not found at {followers_path}")
-    sys.exit(1)
-if not os.path.exists(following_path):
-    print(f"ERROR: following file not found at {following_path}")
-    sys.exit(1)
-
 # --- Utility to normalize a username ---
 def norm(u):
     if not isinstance(u, str):
@@ -99,6 +85,32 @@ def extract_followers(path):
     users.discard(None)
     return users, problems
 
+def load_snapshot(directory):
+    followers_path = os.path.join(directory, "followers_1.json")
+    following_path = os.path.join(directory, "following.json")
+
+    if not os.path.isdir(directory):
+        print(f"ERROR: directory not found: {directory}")
+        sys.exit(1)
+
+    if not os.path.isfile(followers_path):
+        print(f"ERROR: followers_1.json not found in: {directory}")
+        sys.exit(1)
+
+    if not os.path.isfile(following_path):
+        print(f"ERROR: following.json not found in: {directory}")
+        sys.exit(1)
+
+    followers, followers_problems = extract_followers(followers_path)
+    following, following_problems = extract_following(following_path)
+
+    return (
+        followers,
+        following,
+        followers_problems,
+        following_problems,
+    )
+
 def extract_following(path):
     """Return set of usernames from following.json (robust to shapes)."""
     problems = []
@@ -161,29 +173,277 @@ def extract_following(path):
     return users, problems
 
 # --- Run extraction and report ---
-followers, f_problems = extract_followers(followers_path)
-following, fo_problems = extract_following(following_path)
+def write_username_file(path, title, usernames):
+    with open(path, "w", encoding="utf-8") as out:
+        out.write(f"{title}:\n")
 
-print(f"Followers parsed: {len(followers)} (problems: {len(f_problems)})")
-print(f"Following parsed: {len(following)} (problems: {len(fo_problems)})")
+        for username in usernames:
+            out.write(username + "\n")
 
-# If you want to inspect problems, write them to disk
-if f_problems:
-    with open(os.path.join(parent_dir, "followers_parse_problems.json"), "w", encoding="utf-8") as pf:
-        json.dump(f_problems, pf, ensure_ascii=False, indent=2)
-    print(f"Wrote followers parse problems to followers_parse_problems.json")
 
-if fo_problems:
-    with open(os.path.join(parent_dir, "following_parse_problems.json"), "w", encoding="utf-8") as pf:
-        json.dump(fo_problems, pf, ensure_ascii=False, indent=2)
-    print(f"Wrote following parse problems to following_parse_problems.json")
+def write_problem_file(path, problems):
+    if not problems:
+        return
 
-# --- Compute not-following-back set and write output (overwrite) ---
-not_following_back = sorted(set(following) - set(followers))
-out_file = os.path.join(parent_dir, "unfollowers.txt")
-with open(out_file, "w", encoding="utf-8") as out:
-    out.write("Not following you back:\n")
-    for u in not_following_back:
-        out.write(u + "\n")
+    with open(path, "w", encoding="utf-8") as out:
+        json.dump(problems, out, ensure_ascii=False, indent=2)
 
-print(f"Saved {len(not_following_back)} unfollowers to '{out_file}'")
+
+def get_snapshot_directory(argument):
+    script_directory = os.path.dirname(
+        os.path.abspath(__file__)
+    )
+
+    # Absolute paths can be used directly.
+    if os.path.isabs(argument):
+        return argument
+
+    # Relative folder names are searched beside ig_checker.py.
+    return os.path.join(script_directory, argument)
+
+
+def get_snapshot_name(directory):
+    name = os.path.basename(os.path.normpath(directory))
+    return name.replace(" ", "_")
+
+
+def save_parse_problems(
+    output_directory,
+    snapshot_name,
+    followers_problems,
+    following_problems,
+):
+    if followers_problems:
+        path = os.path.join(
+            output_directory,
+            f"{snapshot_name}_followers_parse_problems.json",
+        )
+
+        write_problem_file(path, followers_problems)
+        print(f"Followers parse problems saved to: {path}")
+
+    if following_problems:
+        path = os.path.join(
+            output_directory,
+            f"{snapshot_name}_following_parse_problems.json",
+        )
+
+        write_problem_file(path, following_problems)
+        print(f"Following parse problems saved to: {path}")
+
+
+def run_single_snapshot(directory, output_directory):
+    (
+        followers,
+        following,
+        followers_problems,
+        following_problems,
+    ) = load_snapshot(directory)
+
+    # Your original big unfollower list.
+    not_following_back = sorted(
+        following - followers
+    )
+
+    snapshot_name = get_snapshot_name(directory)
+
+    output_path = os.path.join(
+        output_directory,
+        f"{snapshot_name}_unfollowers.txt",
+    )
+
+    write_username_file(
+        output_path,
+        "Not following you back",
+        not_following_back,
+    )
+
+    save_parse_problems(
+        output_directory,
+        snapshot_name,
+        followers_problems,
+        following_problems,
+    )
+
+    print(f"Followers parsed: {len(followers)}")
+    print(f"Following parsed: {len(following)}")
+    print(
+        f"Not following you back: "
+        f"{len(not_following_back)}"
+    )
+    print(f"Saved to: {output_path}")
+
+
+def run_comparison(
+    old_directory,
+    new_directory,
+    output_directory,
+):
+    if os.path.abspath(old_directory) == os.path.abspath(
+        new_directory
+    ):
+        print("ERROR: old and new directories are the same.")
+        sys.exit(1)
+
+    (
+        old_followers,
+        old_following,
+        old_followers_problems,
+        old_following_problems,
+    ) = load_snapshot(old_directory)
+
+    (
+        new_followers,
+        new_following,
+        new_followers_problems,
+        new_following_problems,
+    ) = load_snapshot(new_directory)
+
+    # Your original big unfollower list, using the newest data.
+    not_following_back = sorted(
+        new_following - new_followers
+    )
+
+    # Followed you before but are missing from the new export.
+    unfollowed_by_others = sorted(
+        old_followers - new_followers
+    )
+
+    # You followed them before but no longer follow them.
+    unfollowed_by_me = sorted(
+        old_following - new_following
+    )
+
+    old_name = get_snapshot_name(old_directory)
+    new_name = get_snapshot_name(new_directory)
+
+    unfollowers_path = os.path.join(
+        output_directory,
+        f"{new_name}_unfollowers.txt",
+    )
+
+    unfollowed_by_others_path = os.path.join(
+        output_directory,
+        (
+            f"{old_name}_to_{new_name}_"
+            "unfollowed_by_others.txt"
+        ),
+    )
+
+    unfollowed_by_me_path = os.path.join(
+        output_directory,
+        (
+            f"{old_name}_to_{new_name}_"
+            "unfollowed_by_me.txt"
+        ),
+    )
+
+    write_username_file(
+        unfollowers_path,
+        "Not following you back",
+        not_following_back,
+    )
+
+    write_username_file(
+        unfollowed_by_others_path,
+        "Recently unfollowed by others",
+        unfollowed_by_others,
+    )
+
+    write_username_file(
+        unfollowed_by_me_path,
+        "Recently unfollowed by you",
+        unfollowed_by_me,
+    )
+
+    save_parse_problems(
+        output_directory,
+        old_name,
+        old_followers_problems,
+        old_following_problems,
+    )
+
+    save_parse_problems(
+        output_directory,
+        new_name,
+        new_followers_problems,
+        new_following_problems,
+    )
+
+    print(f"Old followers parsed: {len(old_followers)}")
+    print(f"New followers parsed: {len(new_followers)}")
+    print(f"Old following parsed: {len(old_following)}")
+    print(f"New following parsed: {len(new_following)}")
+
+    print()
+    print(
+        f"Not following you back: "
+        f"{len(not_following_back)}"
+    )
+    print(
+        f"Recently unfollowed by others: "
+        f"{len(unfollowed_by_others)}"
+    )
+    print(
+        f"Recently unfollowed by you: "
+        f"{len(unfollowed_by_me)}"
+    )
+
+    print()
+    print(f"Saved to: {unfollowers_path}")
+    print(f"Saved to: {unfollowed_by_others_path}")
+    print(f"Saved to: {unfollowed_by_me_path}")
+
+
+def main():
+    if len(sys.argv) not in (2, 3):
+        script_name = os.path.basename(sys.argv[0])
+
+        print("Usage:")
+        print(
+            f'  python3 {script_name} "<date directory>"'
+        )
+        print(
+            f'  python3 {script_name} '
+            '"<old directory>" "<new directory>"'
+        )
+
+        print()
+        print("Examples:")
+        print(
+            f'  python3 {script_name} "25th July"'
+        )
+        print(
+            f'  python3 {script_name} '
+            '"1st July" "25th July"'
+        )
+
+        sys.exit(1)
+
+    output_directory = os.path.dirname(
+        os.path.abspath(__file__)
+    )
+
+    # One date directory was provided.
+    if len(sys.argv) == 2:
+        directory = get_snapshot_directory(sys.argv[1])
+
+        run_single_snapshot(
+            directory,
+            output_directory,
+        )
+
+    # Two date directories were provided.
+    else:
+        old_directory = get_snapshot_directory(sys.argv[1])
+        new_directory = get_snapshot_directory(sys.argv[2])
+
+        run_comparison(
+            old_directory,
+            new_directory,
+            output_directory,
+        )
+
+
+if __name__ == "__main__":
+    main()
