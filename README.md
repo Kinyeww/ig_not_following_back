@@ -56,7 +56,7 @@ When requesting your information from Instagram:
 1. Select **Followers and following**
 2. Uncheck the other information categories if you do not need them
 3. Select **JSON** as the file format
-4. Choose ALL TIME for date range
+4. Choose **ALL TIME** for date range
 5. Download and extract the archive
 
 You should locate these two files:
